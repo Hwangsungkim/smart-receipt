@@ -7,7 +7,7 @@ from PIL import Image
 import io
 
 # ==========================================
-# 1. 웹 사이트 기본 설정 및 보안 금고 연동
+# 1. 웹 사이트 기본 설정 및 보안 금고
 # ==========================================
 st.set_page_config(page_title="지능형 단가 분석 엔진", page_icon="🧾", layout="wide")
 
@@ -29,7 +29,7 @@ def get_best_available_model():
     return available_models[0].replace('models/', '') if available_models else 'gemini-1.5-flash'
 
 # ==========================================
-# 2. V8 코어 비즈니스 로직 (수학적 오류 완벽 교정)
+# 2. V10 코어 엔진: 비즈니스 로직 및 AI 뇌 구조
 # ==========================================
 def extract_json_from_text(text):
     match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -42,12 +42,10 @@ def calculate_true_unit_price(data):
     summary = data.get("summary", {})
     items = data.get("items", [])
     
-    # [교정 1] 사과와 배를 섞지 않는 순수 할인율 도출 로직
+    # [수학적 교정] 순수 할인율 도출 로직 (이중 부가세 방지)
     total_original = float(summary.get("총주문금액", 1))
     if total_original == 0: total_original = 1
     total_discount = float(summary.get("총할인금액", 0))
-    
-    # 예: (5,725,000 - 1,345,375) / 5,725,000 = 0.765 (순수 76.5%에 구매함)
     payment_ratio = (total_original - total_discount) / total_original
     
     processed_data = []
@@ -56,46 +54,47 @@ def calculate_true_unit_price(data):
         original_price = float(item.get("원래가격", 0))
         qty = float(item.get("기본수량", 1))
         promo_qty = float(item.get("증정수량", 0))
-        units_per_box = float(item.get("포장당_낱개수량", 1)) # [교정 2] 낱개 환산 지능 탑재
+        units_per_box = float(item.get("포장당_낱개수량", 1)) 
         is_vat_included = item.get("부가세포함여부", True)
         
+        # 전체 수량 계산 (박스 단위 및 낱개 환산)
         total_boxes = qty + promo_qty
-        total_units = total_boxes * units_per_box # 최종 낱개 수량
+        base_units = qty * units_per_box         # 증정품 제외 순수 구매 낱개
+        total_units = total_boxes * units_per_box # 증정품 포함 전체 낱개
         
         if total_units == 0: continue
             
-        # UI 출력용 수량 텍스트 포맷팅
+        # UI 출력용 텍스트 (보너스 여부 표시)
+        qty_str = f"{int(total_boxes)}개"
+        if promo_qty > 0:
+            qty_str = f"{int(qty)}+{int(promo_qty)} (총 {int(total_boxes)}개)"
         if units_per_box > 1:
-            qty_str = f"{int(total_boxes)}박스 (총 {int(total_units)}개)"
-        else:
-            qty_str = f"{int(total_boxes)}개"
+            qty_str += f" / 총 {int(total_units)}알"
 
-        # ------------------------------------------------
-        # [A안] 정상 단가 (1알/개 기준)
-        # ------------------------------------------------
+        # [A안] 정상 단가 (할인 전 1개/알 기준)
         simple_unit_total = original_price / total_units
-        if is_vat_included:
-            simple_net = simple_unit_total / 1.1
-            simple_vat = simple_unit_total
-        else:
-            simple_net = simple_unit_total
-            simple_vat = simple_unit_total * 1.1
+        simple_net = simple_unit_total / 1.1 if is_vat_included else simple_unit_total
+        simple_vat = simple_unit_total if is_vat_included else simple_unit_total * 1.1
             
-        # ------------------------------------------------
-        # [B안] 행사가 단가 (1알/개 기준, 순수 할인율 적용)
-        # ------------------------------------------------
-        disc_unit_total = (original_price * payment_ratio) / total_units
-        if is_vat_included:
-            disc_net = disc_unit_total / 1.1
-            disc_vat = disc_unit_total
+        # [B안] 최종 실구매 단가 (할인 후 전체 수량 기준)
+        actual_paid_for_item = original_price * payment_ratio
+        disc_unit_total = actual_paid_for_item / total_units
+        disc_net = disc_unit_total / 1.1 if is_vat_included else disc_unit_total
+        disc_vat = disc_unit_total if is_vat_included else disc_unit_total * 1.1
+
+        # [C안] 보너스 제외 단가 (마진 방어용 듀얼 계산기)
+        if promo_qty > 0 and base_units > 0:
+            no_bonus_unit_total = actual_paid_for_item / base_units
+            no_bonus_vat = no_bonus_unit_total if is_vat_included else no_bonus_unit_total * 1.1
+            no_bonus_str = f"{round(no_bonus_vat):,}원"
         else:
-            disc_net = disc_unit_total
-            disc_vat = disc_unit_total * 1.1
+            no_bonus_str = "-" # 보너스가 없는 일반 상품은 빈칸 처리
         
         processed_data.append({
             "상품명": name,
             "수량": qty_str,
-            "✨실구매단가(VAT포함)": f"{round(disc_vat):,}원", # 클린 뷰용 핵심 데이터
+            "✨실구매단가(VAT포함)": f"{round(disc_vat):,}원", 
+            "🚫보너스제외단가(VAT포함)": no_bonus_str,
             "🅰️정상단가(VAT포함)": f"{round(simple_vat):,}원",
             "🅰️정상단가(VAT제외)": f"{round(simple_net):,}원",
             "🅱️행사단가(VAT제외)": f"{round(disc_net):,}원"
@@ -105,27 +104,30 @@ def calculate_true_unit_price(data):
 
 def analyze_receipt(image, model_name):
     model = genai.GenerativeModel(model_name)
+    
+    # [V10 AI 뇌 개조] 악필/간이영수증 방어 및 환각 통제 프롬프트
     prompt = """
-    당신은 영수증 및 B2B 거래명세서 전문 회계 AI입니다. 첨부된 이미지를 분석하여 
+    당신은 영수증, B2B 거래명세서, 간이 수기(손글씨) 영수증을 모두 판독하는 최고급 회계 AI입니다. 
     반드시 아래 JSON 객체 형식으로만 응답하세요. 마크다운 제외.
     
-    [엄격한 주의사항]
-    1. '원래가격'은 절대 1개 단가로 나누어 계산하지 마세요. 해당 줄의 '공급가액 총액'을 그대로 적으세요.
-    2. 도매 명세서(B2B)의 경우 품목별 금액이 '공급가액' 기준이면 "부가세포함여부"를 false로 하세요.
-    3. 명세서에 포장당 낱개 수량(예: 1박스에 30정, 1통에 60알)이 적혀있다면 "포장당_낱개수량"에 적고, 안 적혀있으면 1로 적으세요.
-    4. "총할인금액"은 명세서 하단에 적힌 모든 할인의 총합을 적으세요. 없으면 0.
+    [엄격한 예외 통제 지침 - V10]
+    1. **손글씨(수기) 판독 방어**: 글씨가 너무 뭉개져서 도저히 읽을 수 없거나 확신이 안 서면 소설을 쓰지 말고 상품명에 "[수기/판독불가]" 라고 적으세요.
+    2. **특수기호 무시**: 손글씨 영수증에서 금액이나 수량 뒤에 붙은 펜 자국(`-`, `=`, `ㄴ`, `ㄷ` 등)은 절대 문자로 읽지 말고 순수 아라비아 숫자만 발라내세요. (예: 10,- -> 10000)
+    3. **단가 역산 금지**: '원래가격'은 절대 수량으로 나누지 마세요. 무조건 해당 줄에 적힌 '공급가액 총액'을 그대로 적으세요.
+    4. **검산 기능**: 당신이 추출한 품목별 금액의 합이 맨 아래에 적힌 '총합계'와 일치하는지 논리적으로 점검한 후 출력하세요.
+    5. **도매/수기 부가세 처리**: B2B 명세서나 간이영수증(부가세 별도 표기 등)은 "부가세포함여부"를 false로 하세요.
     
     {
       "summary": {
-        "총주문금액": 5725000, 
-        "총할인금액": 1345375,
-        "최종결제금액": 4817588
+        "총주문금액": 104000, 
+        "총할인금액": 0,
+        "최종결제금액": 104000
       },
       "items": [
         {
-          "상품명": "상품이름",
-          "원래가격": 645000, 
-          "기본수량": 15,
+          "상품명": "상품이름 (모르면 [수기/판독불가])",
+          "원래가격": 10000, 
+          "기본수량": 2,
           "증정수량": 0,
           "포장당_낱개수량": 1,
           "부가세포함여부": false
@@ -137,7 +139,7 @@ def analyze_receipt(image, model_name):
     return extract_json_from_text(response.text)
 
 # ==========================================
-# 3. UI/UX 화면 구성 (클린 뷰 연동 완료)
+# 3. UI/UX 화면 구성 (클린 뷰 연동)
 # ==========================================
 st.title("🧾 지능형 단가 분석 엔진")
 st.markdown("스마트폰이나 PC에서 영수증을 올려 **진짜 1개당 실구매가**를 확인하세요.")
@@ -150,27 +152,27 @@ if uploaded_file is not None:
     st.image(image, caption="업로드된 영수증", width=350)
     
     if st.button("🚀 영수증 분석 시작하기", type="primary"):
-        with st.spinner("AI가 프로모션과 부가세를 역산하고 있습니다. 잠시만 기다려주세요..."):
+        with st.spinner("AI가 수기 데이터와 프로모션을 해독 중입니다. 잠시만 기다려주세요..."):
             best_model = get_best_available_model()
             try:
-                # 데이터 추출 및 계산 (코어 엔진 가동)
                 extracted_data = analyze_receipt(image, best_model)
                 result_df = calculate_true_unit_price(extracted_data)
                 
-                # [UX 핵심 1] 클린 뷰 (Clean View)
                 st.success("✅ 분석이 완료되었습니다!")
+                
+                # [UX 핵심 1] 클린 뷰 (Clean View)
                 st.subheader("📊 핵심 단가 요약 (1개/알 기준)")
                 clean_df = result_df[["상품명", "수량", "✨실구매단가(VAT포함)"]]
                 st.dataframe(clean_df, use_container_width=True)
                 
-                # [UX 핵심 2] 상세 뷰 토글 스위치 (Detail View)
-                with st.expander("🔍 상세 회계 내역 및 정상가 비교 보기"):
-                    st.markdown("회계 장부 기장 및 마진율 계산을 위한 전체 데이터입니다.")
+                # [UX 핵심 2] 상세 뷰 토글 스위치 (Detail View - 보너스 단가 포함)
+                with st.expander("🔍 상세 회계 내역 및 마진 방어선 보기"):
+                    st.markdown("회계 장부 기장 및 행사 종료 후 원가(보너스 제외 단가)를 확인하세요.")
                     st.dataframe(result_df, use_container_width=True)
                 
                 st.divider()
                 
-                # [UX 핵심 3] 엑셀 다운로드 (전체 데이터 보존)
+                # [UX 핵심 3] 엑셀 다운로드
                 st.markdown("### 💾 결과 저장")
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
